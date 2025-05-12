@@ -4,12 +4,14 @@ import java.util.List;
 import java.util.Arrays;
 
 import org.apache.beam.sdk.Pipeline;
+import org.apache.beam.sdk.io.TextIO;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.transforms.Create;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.transforms.SerializableFunction;
+import org.apache.beam.sdk.transforms.Sum;
 import org.apache.beam.sdk.transforms.DoFn.ProcessContext;
 import org.apache.beam.sdk.transforms.DoFn.ProcessElement;
 import org.apache.beam.sdk.transforms.Filter;
@@ -21,67 +23,76 @@ import org.slf4j.LoggerFactory;
 
 public class App {
     private static final Logger LOG = LoggerFactory.getLogger(App.class);
+    private static final Double FIXED_COST = 15d;
+    private static final String ABOVE_KEY = "above";
+    private static final String BELOW_KEY = "below";
 
     public static void main(String[] args) {
-        LOG.info("Running task");
-
         PipelineOptions options = PipelineOptionsFactory.fromArgs(args).create();
         Pipeline pipeline = Pipeline.create(options);
 
-        PCollection<KV<Integer,Integer>> input = pipeline.apply(
-            Create.of(KV.of(1,11),
-            KV.of(1,36),
-            KV.of(2, 91),
-            KV.of(3, 33),
-            KV.of(3, 11),
-            KV.of(4, 33))
-        );
+        PCollection<String> input = pipeline.apply(TextIO.read().from("gs://apache-beam-samples/nyc_taxi/misc/sample1000.csv"));
 
-        PCollection<Long> output = applyTransform(input);
+        PCollection<Double> rideTotalAmounts = input.apply(ParDo.of(new ExtractTaxiRideCostFn()));
 
-        output.apply("Log", ParDo.of(new LogOutput<>("Input has elements")));
+        PCollection<Double> aboveCosts = getAboveCost(rideTotalAmounts);
+        PCollection<Double> belowCosts = getBelowCost(rideTotalAmounts);
 
+        PCollection<Double> aboveCostsSum = getSum(aboveCosts, "Sum above Costs");
+        PCollection<Double> belowCostsSum = getSum(belowCosts, "Sum below Costs");
 
+        PCollection<KV<String, Double>> aboveKV = setKeyForCost(aboveCostsSum, ABOVE_KEY)
+            .apply("Log above cost", ParDo.of(new LogOutput<>("Above pCollection output")));
 
+        PCollection<KV<String, Double>> belowKV = setKeyForCost(belowCostsSum, BELOW_KEY)
+            .apply("Log below cost", ParDo.of(new LogOutput<>("Below pCollection output")));
 
         pipeline.run();
-
-        // Option 2: Inline anonymous DoFn
-        // input.apply(ParDo.of(new DoFn<String, String>() {
-        //     @ProcessElement
-        //     public void processElement(ProcessContext c) throws Exception {
-        //         LOG.info("Inline processing word: {}", c.element());
-        //         c.output(c.element());
-        //     }
-        // }));
-
     }
 
-    static PCollection<Long> applyTransform(PCollection<KV<Integer, Integer>> input) {
-        return input.apply(Count.globally());
+    static PCollection<Double> getSum(PCollection<Double> input, String name) {
+
+        return input.apply(Sum.doublesGlobally());
     }
 
-    public static class LogStrings extends DoFn<String, String> {
+    static PCollection<Double> getAboveCost(PCollection<Double> input) {
+
+        return input.apply(Filter.greaterThanEq(15.0));
+    }
+
+    static PCollection<Double> getBelowCost(PCollection<Double> input) {
+
+        return input.apply(Filter.lessThan(15.0));
+    }
+
+    // Define the type PCollection<?>
+    static PCollection<KV<String, Double>> setKeyForCost(PCollection<Double> input, String key) {
+        return input.apply("Set Key " + key, ParDo.of(new DoFn<Double, KV<String, Double>>() {
+            @ProcessElement
+            public void processElement(ProcessContext c) {
+                c.output(KV.of(key, c.element()));
+            }
+        }));
+    }
+
+    static class ExtractTaxiRideCostFn extends DoFn<String, Double> {
         @ProcessElement
-        public void processElement(ProcessContext c) throws Exception {
-            LOG.info("Processing word: {}", c.element());
-            c.output(c.element());
+        public void processElement(ProcessContext c) {
+            String[] items = c.element().split(",");
+            Double totalAmount = tryParseTaxiRideCost(items);
+            c.output(totalAmount);
         }
     }
 
-    public static class LogIntegers extends DoFn<Integer, Integer> {
-        @ProcessElement
-        public void processElement(ProcessContext c) throws Exception {
-            LOG.info("Processing number: {}", c.element());
-            c.output(c.element());
-        }
+    private static String tryParseString(String[] inputItems, int index) {
+        return inputItems.length > index ? inputItems[index] : null;
     }
 
-    public static class LogLongs extends DoFn<Long, Long> {
-        @ProcessElement
-        public void processElement(ProcessContext c) throws Exception {
-            LOG.info("Processing number: {}", c.element());
-            c.output(c.element());
+    private static Double tryParseTaxiRideCost(String[] inputItems) {
+        try {
+            return Double.parseDouble(tryParseString(inputItems, 16));
+        } catch (NumberFormatException | NullPointerException e) {
+            return 0.0;
         }
     }
 
@@ -101,4 +112,5 @@ public class App {
             LOG.info(prefix + ": {}", c.element());
         }
     }
+
 }
