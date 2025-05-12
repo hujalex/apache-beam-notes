@@ -25,19 +25,16 @@ public class App {
         PipelineOptions options = PipelineOptionsFactory.fromArgs(args).create();
         Pipeline pipeline = Pipeline.create(options);
 
-        PCollection<String> input = pipeline
-            .apply(Create.of(List.of("Hello", "world", "Hi")));
+        PCollection<Integer> input = 
+            pipeline.apply(Create.of(1,2,3,4,5,6,7,8,9));
+        
+        PCollection<Integer> filteredInts = applyTransform(input);
 
-        PCollection<String> filteredStrings = input
-            .apply(Filter.by(new SerializableFunction<String, Boolean>() {
-                @Override
-                public Boolean apply(String input) {
-                    return input.length() > 3;
-                }
-            }));
 
-        // Option 1: Using the predefined LogStrings class
-        filteredStrings.apply(ParDo.of(new LogStrings()));
+
+        filteredInts.apply(ParDo.of(new LogIntegers()));
+
+        pipeline.run();
 
         // Option 2: Inline anonymous DoFn
         // input.apply(ParDo.of(new DoFn<String, String>() {
@@ -48,7 +45,10 @@ public class App {
         //     }
         // }));
 
-        pipeline.run();
+    }
+
+    static PCollection<Integer> applyTransform(PCollection<Integer> input) {
+        return input.apply(Filter.by(number -> number % 2 == 0));
     }
 
     public static class LogStrings extends DoFn<String, String> {
