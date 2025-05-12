@@ -1,3 +1,5 @@
-com/example/App$LogStrings.class
 com/example/App.class
+com/example/App$LogLongs.class
+com/example/App$LogStrings.class
+com/example/App$LogOutput.class
 com/example/App$LogIntegers.class
