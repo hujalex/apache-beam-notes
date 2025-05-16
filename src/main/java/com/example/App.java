@@ -15,8 +15,11 @@ import org.apache.beam.sdk.transforms.Sum;
 import org.apache.beam.sdk.transforms.DoFn.ProcessContext;
 import org.apache.beam.sdk.transforms.DoFn.ProcessElement;
 import org.apache.beam.sdk.transforms.Filter;
+import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.Count;
 import org.apache.beam.sdk.values.PCollection;
+import org.apache.beam.sdk.values.TypeDescriptor;
+import org.apache.beam.sdk.values.TypeDescriptors;
 import org.apache.beam.sdk.values.KV;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,23 +34,20 @@ public class App {
         PipelineOptions options = PipelineOptionsFactory.fromArgs(args).create();
         Pipeline pipeline = Pipeline.create(options);
 
-        PCollection<String> input = pipeline.apply(TextIO.read().from("gs://apache-beam-samples/nyc_taxi/misc/sample1000.csv"));
+        PCollection<Integer> input = pipeline.apply(Create.of(10, 20, 30, 40, 50));
+        PCollection<Integer> output = applyTransform(input);
 
-        PCollection<Double> rideTotalAmounts = input.apply(ParDo.of(new ExtractTaxiRideCostFn()));
 
-        PCollection<Double> aboveCosts = getAboveCost(rideTotalAmounts);
-        PCollection<Double> belowCosts = getBelowCost(rideTotalAmounts);
-
-        PCollection<Double> aboveCostsSum = getSum(aboveCosts, "Sum above Costs");
-        PCollection<Double> belowCostsSum = getSum(belowCosts, "Sum below Costs");
-
-        PCollection<KV<String, Double>> aboveKV = setKeyForCost(aboveCostsSum, ABOVE_KEY)
-            .apply("Log above cost", ParDo.of(new LogOutput<>("Above pCollection output")));
-
-        PCollection<KV<String, Double>> belowKV = setKeyForCost(belowCostsSum, BELOW_KEY)
-            .apply("Log below cost", ParDo.of(new LogOutput<>("Below pCollection output")));
+        output.apply("LOG", ParDo.of(new LogOutput<Integer>()));
 
         pipeline.run();
+    }
+
+    static PCollection<Integer> applyTransform(PCollection<Integer> input) {
+        return input.apply(
+            MapElements.into(TypeDescriptors.integers())
+                .via(number -> number * 10)
+        );
     }
 
     static PCollection<Double> getSum(PCollection<Double> input, String name) {
