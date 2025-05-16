@@ -15,7 +15,9 @@ import org.apache.beam.sdk.transforms.Sum;
 import org.apache.beam.sdk.transforms.DoFn.ProcessContext;
 import org.apache.beam.sdk.transforms.DoFn.ProcessElement;
 import org.apache.beam.sdk.transforms.Filter;
+import org.apache.beam.sdk.transforms.FlatMapElements;
 import org.apache.beam.sdk.transforms.MapElements;
+import org.apache.beam.sdk.transforms.GroupByKey;
 import org.apache.beam.sdk.transforms.Count;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.TypeDescriptor;
@@ -34,20 +36,24 @@ public class App {
         PipelineOptions options = PipelineOptionsFactory.fromArgs(args).create();
         Pipeline pipeline = Pipeline.create(options);
 
-        PCollection<Integer> input = pipeline.apply(Create.of(10, 20, 30, 40, 50));
-        PCollection<Integer> output = applyTransform(input);
+        PCollection<String> input =
+                pipeline.apply(
+                        Create.of("apple", "ball", "car", "bear", "cheetah", "ant")
+                );
 
+        PCollection<KV<String, Iterable<String>>> output = applyTransform(input);
 
-        output.apply("LOG", ParDo.of(new LogOutput<Integer>()));
+        output.apply("Log", ParDo.of(new LogOutput<KV<String, Iterable<String>>>()));
 
         pipeline.run();
     }
 
-    static PCollection<Integer> applyTransform(PCollection<Integer> input) {
-        return input.apply(
-            MapElements.into(TypeDescriptors.integers())
-                .via(number -> number * 10)
-        );
+    static PCollection<KV<String, Iterable<String>>> applyTransform(PCollection<String> input) {
+        return input
+            .apply(MapElements.into(TypeDescriptors.kvs(TypeDescriptors.strings(), TypeDescriptors.strings()))
+                    .via(word -> KV.of(word.substring(0, 1), word)))
+        
+            .apply(GroupByKey.create());
     }
 
     static PCollection<Double> getSum(PCollection<Double> input, String name) {
