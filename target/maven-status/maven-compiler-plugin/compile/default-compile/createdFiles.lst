@@ -1,4 +1,6 @@
 com/example/App.class
+com/example/App$2.class
 com/example/App$1.class
+com/example/App$3.class
+com/example/App$WordsAlphabet.class
 com/example/App$LogOutput.class
-com/example/App$ExtractTaxiRideCostFn.class

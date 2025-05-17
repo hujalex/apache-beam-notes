@@ -3,6 +3,12 @@ package com.example;
 import java.util.List;
 import java.util.Arrays;
 
+import org.apache.beam.sdk.transforms.join.CoGroupByKey;
+import org.apache.beam.sdk.values.TupleTag;
+import org.apache.beam.sdk.values.TupleTagList;
+import org.apache.beam.sdk.transforms.DoFn.OutputReceiver;
+import org.apache.beam.sdk.transforms.DoFn.Element;
+
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.io.TextIO;
 import org.apache.beam.sdk.options.PipelineOptions;
@@ -14,12 +20,15 @@ import org.apache.beam.sdk.transforms.SerializableFunction;
 import org.apache.beam.sdk.transforms.Sum;
 import org.apache.beam.sdk.transforms.DoFn.ProcessContext;
 import org.apache.beam.sdk.transforms.DoFn.ProcessElement;
+import org.apache.beam.sdk.transforms.join.CoGbkResult;
+import org.apache.beam.sdk.transforms.join.KeyedPCollectionTuple;
 import org.apache.beam.sdk.transforms.Filter;
 import org.apache.beam.sdk.transforms.FlatMapElements;
 import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.GroupByKey;
 import org.apache.beam.sdk.transforms.Count;
 import org.apache.beam.sdk.values.PCollection;
+import org.apache.beam.sdk.values.PCollectionTuple;
 import org.apache.beam.sdk.values.TypeDescriptor;
 import org.apache.beam.sdk.values.TypeDescriptors;
 import org.apache.beam.sdk.values.KV;
@@ -36,87 +45,71 @@ public class App {
         PipelineOptions options = PipelineOptionsFactory.fromArgs(args).create();
         Pipeline pipeline = Pipeline.create(options);
 
-        PCollection<String> input =
-                pipeline.apply(
-                        Create.of("apple", "ball", "car", "bear", "cheetah", "ant")
-                );
+        PCollection<Integer> input = pipeline.apply(Create.of(10, 50, 120, 20, 200, 0));
 
-        PCollection<KV<String, Iterable<String>>> output = applyTransform(input);
+        TupleTag<Integer> numBelow100Tag = new TupleTag<Integer>() {};
+        TupleTag<Integer> numAbove100Tag = new TupleTag<Integer>() {};
 
-        output.apply("Log", ParDo.of(new LogOutput<KV<String, Iterable<String>>>()));
+        PCollectionTuple outputTuple = applyTransform(input, numBelow100Tag, numAbove100Tag);
+
+        outputTuple.get(numBelow100Tag).apply("Nums Below 100", ParDo.of(new LogOutput<>("Number <= 100: ")));
+        outputTuple.get(numAbove100Tag).apply("Nums above 100", ParDo.of(new LogOutput<>("Number > 100: ")));
 
         pipeline.run();
     }
 
-    static PCollection<KV<String, Iterable<String>>> applyTransform(PCollection<String> input) {
-        return input
-            .apply(MapElements.into(TypeDescriptors.kvs(TypeDescriptors.strings(), TypeDescriptors.strings()))
-                    .via(word -> KV.of(word.substring(0, 1), word)))
-        
-            .apply(GroupByKey.create());
-    }
-
-    static PCollection<Double> getSum(PCollection<Double> input, String name) {
-
-        return input.apply(Sum.doublesGlobally());
-    }
-
-    static PCollection<Double> getAboveCost(PCollection<Double> input) {
-
-        return input.apply(Filter.greaterThanEq(15.0));
-    }
-
-    static PCollection<Double> getBelowCost(PCollection<Double> input) {
-
-        return input.apply(Filter.lessThan(15.0));
-    }
-
-    // Define the type PCollection<?>
-    static PCollection<KV<String, Double>> setKeyForCost(PCollection<Double> input, String key) {
-        return input.apply("Set Key " + key, ParDo.of(new DoFn<Double, KV<String, Double>>() {
+    static PCollectionTuple applyTransform(
+        PCollection<Integer> input, TupleTag<Integer> numBelow100Tag, TupleTag<Integer> numAbove100Tag
+    ) {
+        return input.apply(ParDo.of(new DoFn<Integer, Integer>() {
             @ProcessElement
-            public void processElement(ProcessContext c) {
-                c.output(KV.of(key, c.element()));
+            public void processElement(@Element Integer number, MultiOutputReceiver out) {
+                if (number <= 100) {
+                    out.get(numBelow100Tag).output(number);
+                } else {
+                    out.get(numAbove100Tag).output(number);
+                }
             }
-        }));
+        }).withOutputTags(numBelow100Tag, TupleTagList.of(numAbove100Tag)));
     }
 
-    static class ExtractTaxiRideCostFn extends DoFn<String, Double> {
-        @ProcessElement
-        public void processElement(ProcessContext c) {
-            String[] items = c.element().split(",");
-            Double totalAmount = tryParseTaxiRideCost(items);
-            c.output(totalAmount);
+   
+    static class WordsAlphabet {
+        private String alphabet;
+        private String fruit;
+        private String country;
+
+        public WordsAlphabet(String alphabet, String fruit, String country) {
+            this.alphabet = alphabet;
+            this.fruit = fruit;
+            this.country = country;
+        }
+
+        @Override
+        public String toString() {
+            return "WordsAlphabet{" +
+                    "alphabet='" + alphabet + '\'' +
+                    ", fruit='" + fruit + '\'' +
+                    ", country='" + country + '\'' +
+                    '}';
         }
     }
 
-    private static String tryParseString(String[] inputItems, int index) {
-        return inputItems.length > index ? inputItems[index] : null;
+static class LogOutput<T> extends DoFn<T, T> {
+    private static final Logger LOG = LoggerFactory.getLogger(LogOutput.class);
+    private String prefix;
+
+    LogOutput() {
+        this.prefix = "Processing element";
     }
 
-    private static Double tryParseTaxiRideCost(String[] inputItems) {
-        try {
-            return Double.parseDouble(tryParseString(inputItems, 16));
-        } catch (NumberFormatException | NullPointerException e) {
-            return 0.0;
-        }
+    LogOutput(String prefix) {
+        this.prefix = prefix;
     }
 
-    static class LogOutput<T> extends DoFn<T, T> {
-        private String prefix;
-
-        LogOutput() {
-            this.prefix = "Processing element";
-        }
-
-        LogOutput(String prefix) {
-            this.prefix = prefix;
-        }
-
-        @ProcessElement
-        public void processElement(ProcessContext c) throws Exception {
-            LOG.info(prefix + ": {}", c.element());
-        }
+    @ProcessElement
+    public void processElement(ProcessContext c) throws Exception {
+        LOG.info(prefix + ": {}", c.element());
     }
-
 }
+}  
